@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Place Management</title>
+    <style>
+        .nested {
+            margin-left: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Place Management</h1>
+
+    {% if messages %}
+    <ul class="messages">
+        {% for message in messages %}
+        <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    <form id="placeForm">
+        <select id="placeDropdown">
+            <option value="">Select a place</option>
+            {% for place in places %}
+                <option value="{{ place.id }}">{{ place.place_name }}</option>
+            {% endfor %}
+        </select>
+    </form>
+
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <h2>Upload Excel File</h2>
+        <input type="file" name="excel_file" accept=".xlsx, .xls">
+        <select name="parent_place">
+            <option value="">Select a parent place (optional)</option>
+            {% for place in places %}
+                <option value="{{ place.id }}">{{ place.place_name }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" name="upload">Upload</button>
+    </form>
+
+    <form method="post" id="exportForm">
+        {% csrf_token %}
+        <h2>Export to Excel</h2>
+        <select name="export_type" id="exportType">
+            <option value="default">Default Export (All Places)</option>
+            <option value="custom">Custom Export (Selected Places)</option>
+        </select>
+        <div id="placeSelection" style="display: none;">
+            <h3>Select Places to Export:</h3>
+            {% for place in places %}
+                {% if not place.parent %}
+                    <div>
+                        <label>
+                            <input type="checkbox" name="selected_places" value="{{ place.id }}" class="state-checkbox">
+                            {{ place.place_name }}
+                        </label>
+                        {% include "place_tree.html" with place=place %}
+                    </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+        <button type="submit" name="export">Export</button>
+    </form>
+
+    <script>
+        document.getElementById('placeDropdown').addEventListener('change', function() {
+            const selectedPlaceId = this.value;
+            if (selectedPlaceId) {
+                
+                console.log('Selected Place ID:', selectedPlaceId);
+            }
+        });
+
+        document.getElementById('exportType').addEventListener('change', function() {
+            var placeSelection = document.getElementById('placeSelection');
+            placeSelection.style.display = this.value === 'custom' ? 'block' : 'none';
+        });
+
+        // Function to toggle child checkboxes
+        function toggleChildCheckboxes(parentCheckbox) {
+            const parentDiv = parentCheckbox.closest('div');
+            const childCheckboxes = parentDiv.querySelectorAll('.nested input[type="checkbox"]');
+            childCheckboxes.forEach(checkbox => {
+                checkbox.disabled = !parentCheckbox.checked;
+                if (!parentCheckbox.checked) {
+                    checkbox.checked = false;
+                }
+            });
+        }
+
+        // Add event listeners to state checkboxes
+        document.querySelectorAll('.state-checkbox').forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                toggleChildCheckboxes(this);
+            });
+            // Initial call to set initial state
+            toggleChildCheckboxes(checkbox);
+        });
+
+        // Handle form submission
+        document.getElementById('exportForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+
+            fetch(this.action, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                }
+            }).then(response => {
+                if (response.ok) {
+                    return response.blob();
+                }
+                throw new Error('Network response was not ok.');
+            }).then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = 'places_export.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+            }).catch(error => {
+                console.error('Error:', error);
+            }).finally(() => {
+                // Refresh the page after export
+                window.location.reload();
+            });
+        });
+    </script>
+</body>
+</html>
