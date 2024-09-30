@@ -1,9 +1,0 @@
-{% for child in place.place_set.all %}
-    <div class="nested">
-        <label>
-            <input type="checkbox" name="selected_places" value="{{ child.id }}" class="child-checkbox">
-            {{ child.place_name }}
-        </label>
-        {% include "place_tree.html" with place=child %}
-    </div>
-{% endfor %}
