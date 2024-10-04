@@ -1,5 +1,5 @@
 <------Required modules------>
 
-pip install django
+  pip install django
 
-pip install openpyxl
+  pip install openpyxl
