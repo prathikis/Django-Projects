@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Places Selector</title>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            line-height: 1.2;
+            color: #333;
+            max-width: 550px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+
+        .container {
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        h1,
+        h2 {
+            color: #2c3e50;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .section {
+            margin-bottom: 30px;
+        }
+
+        select,
+        input[type="file"],
+        button {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+
+        button {
+            background-color: #3498db;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #2980b9;
+        }
+
+        button:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+
+        .messages {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        .messages li {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            background-color: #0ee820;
+            color: #fff;
+        }
+
+        #exportMessage {
+            margin-top: 10px;
+            font-weight: bold;
+        }
+    </style>
+
+</head>
+
+<body>
+    <div class="container">
+        <h1>Places</h1>
+
+        <!-- Place Hierarchy Dropdowns -->
+        <div class="section">
+            <h2>Place Hierarchy</h2> 
+            <select id="stateSelect" class="hierarchy-select">
+                <option value="">Select a state</option>
+            </select>
+            <select id="districtSelect" class="hierarchy-select" style="display: none;">
+                <option value="">Select a district</option>
+            </select>
+            <select id="talukSelect" class="hierarchy-select" style="display: none;">
+                <option value="">Select a taluk</option>
+            </select>
+        </div>
+
+        <!-- Messages -->
+        {% if messages %}
+        <ul class="messages">
+            {% for message in messages %}
+            <li{% if message.tags %} class="{{ message.tags }}" {% endif %}>{{ message }}</li>
+                {% endfor %}
+        </ul>
+        {% endif %}
+
+        <!-- File Upload -->
+        <div class="section">
+            <h2>Upload Excel File</h2>
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                <input type="file" name="excel_file" accept=".xlsx,.xls">
+                <button type="submit" name="upload">Upload</button>
+            </form>
+        </div>
+
+        <!-- Export Options -->
+        <div class="section">
+            <h2>Export Options</h2>
+            <form method="post" action="{% url 'places:place_view' %}" id="exportForm">
+                {% csrf_token %}
+                <input type="hidden" name="export" value="true">
+                <select name="export_type" id="exportType">
+                    <option value="default">Export All</option>
+                    <option value="selected">Export Selected</option>
+                </select>
+
+                <button type="submit" id="exportButton">Export</button>
+            </form>
+
+            <form method="post" action="{% url 'places:place_view' %}" id="exportHeadersForm">
+                {% csrf_token %}
+                <input type="hidden" name="export_headers" value="true">
+                <button type="submit">Download Template</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let placeHierarchy = [];
+
+        // Function to create the data in dropdown
+        function populateDropdown(selectId, options) {
+            const select = document.getElementById(selectId);
+            select.innerHTML = `<option value="">Select a ${selectId.replace('Select', '').toLowerCase()}</option>`;
+            options.forEach(option => {
+                const optionElement = document.createElement('option');
+                optionElement.value = option.id;
+                optionElement.textContent = option.name;
+                select.appendChild(optionElement);
+            });
+
+            select.style.display = 'block';
+            select.disabled = options.length === 0;
+        }
+
+        //Function to reset and hide distrcits/taluks dropdowns
+        function resetLowerDropdowns(startLevel) {
+            const levels = ['district', 'taluk'];
+            const startIndex = levels.indexOf(startLevel);
+            for (let i = startIndex; i < levels.length; i++) {
+                const select = document.getElementById(`${levels[i]}Select`);
+                select.innerHTML = `<option value="">Select a ${levels[i]}</option>`;
+                select.style.display = 'none';
+                select.disabled = true;
+            }
+        }
+
+        // listener state selection
+        document.getElementById('stateSelect').addEventListener('change', function () {
+            const stateId = this.value;
+            const selectedState = placeHierarchy.find(state => state.id == stateId);
+            if (selectedState && selectedState.children.length > 0) {
+                populateDropdown('districtSelect', selectedState.children);
+                resetLowerDropdowns('taluk');
+            } else {
+                resetLowerDropdowns('district');
+            }
+        });
+
+        // Listener for district selection
+        document.getElementById('districtSelect').addEventListener('change', function () {
+            const districtId = this.value;
+            const stateId = document.getElementById('stateSelect').value;
+            const selectedState = placeHierarchy.find(state => state.id == stateId);
+            const selectedDistrict = selectedState.children.find(district => district.id == districtId);
+            if (selectedDistrict && selectedDistrict.children.length > 0) {
+                populateDropdown('talukSelect', selectedDistrict.children);
+            } else {
+                resetLowerDropdowns('taluk');
+            }
+        });
+
+        // Fetch the place hierarchy data and create the dropdowns
+        fetch('{% url "places:get_place_hierarchy" %}')
+            .then(response => response.json())
+            .then(data => {
+                placeHierarchy = data;
+                populateDropdown('stateSelect', data);
+            })
+            .catch(error => console.error('Error:', error));
+
+        // Modify the export form submission handler
+        document.getElementById('exportForm').addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            const exportType = document.getElementById('exportType').value;
+            const form = this;
+            const exportButton = document.getElementById('exportButton');
+
+            // Remove old hidden inputs
+            document.querySelectorAll('input[name^="selected_"]').forEach(input => input.remove());
+
+            // Get selected places
+            const selectedState = document.getElementById('stateSelect');
+            const selectedDistrict = document.getElementById('districtSelect');
+            const selectedTaluk = document.getElementById('talukSelect');
+
+            // Add new hidden inputs for selected places
+            if (exportType === 'selected') {
+                if (selectedState.value) {
+                    const stateInput = document.createElement('input');
+                    stateInput.type = 'hidden';
+                    stateInput.name = 'selected_state';
+                    stateInput.value = JSON.stringify({
+                        id: selectedState.value,
+                        name: selectedState.options[selectedState.selectedIndex].text
+                    });
+                    form.appendChild(stateInput);
+                }
+                if (selectedDistrict.value) {
+                    const districtInput = document.createElement('input');
+                    districtInput.type = 'hidden';
+                    districtInput.name = 'selected_district';
+                    districtInput.value = JSON.stringify({
+                        id: selectedDistrict.value,
+                        name: selectedDistrict.options[selectedDistrict.selectedIndex].text
+                    });
+                    form.appendChild(districtInput);
+                }
+                if (selectedTaluk.value) {
+                    const talukInput = document.createElement('input');
+                    talukInput.type = 'hidden';
+                    talukInput.name = 'selected_taluk';
+                    talukInput.value = JSON.stringify({
+                        id: selectedTaluk.value,
+                        name: selectedTaluk.options[selectedTaluk.selectedIndex].text
+                    });
+                    form.appendChild(talukInput);
+                }
+            }
+
+            // Add hidden input for export_type
+            const exportTypeInput = document.createElement('input');
+            exportTypeInput.type = 'hidden';
+            exportTypeInput.name = 'export_type';
+            exportTypeInput.value = exportType;
+            form.appendChild(exportTypeInput);
+
+            // Submit the form via fetch
+            const formData = new FormData(form);
+
+            fetch(form.action, { method: 'POST', body: formData })
+                .then(response => response.blob())
+                .then(blob => {
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'places_export.xlsx';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                })
+                .catch(error => console.error('Error:', error));
+        });
+
+        // Add event listeners to update export button state
+        function updateExportButtonState() {
+            const exportType = document.getElementById('exportType').value;
+            const exportButton = document.getElementById('exportButton');
+            const selectedState = document.getElementById('stateSelect').value;
+            const selectedDistrict = document.getElementById('districtSelect').value;
+            const selectedTaluk = document.getElementById('talukSelect').value;
+            const messageDiv = document.querySelector('exportMessage');
+
+
+            if (exportType === 'selected' && !selectedState && !selectedDistrict && !selectedTaluk) {
+                exportButton.disabled = true;
+            } else {
+                exportButton.disabled = false;
+            }
+        }
+
+        document.getElementById('exportType').addEventListener('change', updateExportButtonState);
+        document.getElementById('stateSelect').addEventListener('change', updateExportButtonState);
+        document.getElementById('districtSelect').addEventListener('change', updateExportButtonState);
+        document.getElementById('talukSelect').addEventListener('change', updateExportButtonState);
+
+        // Initial call to set the correct state
+        updateExportButtonState();
+    </script>
+
+</body>
+
+</html>
